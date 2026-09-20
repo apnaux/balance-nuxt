@@ -1,15 +1,14 @@
 <template>
-  <div class="flex flex-col gap-4 w-96">
-    <div class="flex flex-col gap-[2px]">
-      <p class="tracking-wider text-sm">REMAINING BALANCE</p>
-      <ProgressBar :value="balance" :total="BALANCE_LIMIT" :threshold="20" />
-    </div>
+  <div class="flex flex-col gap-4 w-full sm:w-[30rem] h-full min-h-0">
+    <SwipeToTransact
+      :accounts="accounts"
+      @pay="emit('pay', $event)"
+      @refund="emit('refund', $event)"
+    />
 
-    <SwipeToTransact @pay="emit('pay', $event)" @refund="emit('refund', $event)" />
-
-    <div class="w-96 h-[30rem] bg-neutral-50 flex flex-col">
+    <div class="w-full sm:w-[30rem] flex-1 min-h-0 bg-neutral-50 flex flex-col">
       <p class="tracking-wider text-sm font-medium p-4">TRANSACTIONS</p>
-      <div class="flex flex-col h-full overflow-y-scroll">
+      <div class="flex flex-col flex-1 min-h-0 overflow-y-scroll">
         <TransactionItem
           v-for="transaction in transactions"
           :key="transaction.id"
@@ -25,21 +24,25 @@
 </template>
 
 <script setup lang="ts">
-import ProgressBar from './ProgressBar.vue'
 import SwipeToTransact from './SwipeToTransact.vue'
 import TransactionItem from './TransactionItem.vue'
-import type { Transaction } from '../types'
+import type { Account, Transaction } from '../types'
 
-const BALANCE_LIMIT = 10000
+/** Payload emitted by `SwipeToTransact` when a swipe completes. */
+export type TransactPayload = {
+  amount: number
+  account: string
+  category: string
+}
 
 defineProps<{
-  balance: number
+  accounts: Account[]
   transactions: Transaction[]
 }>()
 
 const emit = defineEmits<{
-  pay: [amount: string]
-  refund: [amount: string]
+  pay: [payload: TransactPayload]
+  refund: [payload: TransactPayload]
   select: [transaction: Transaction]
 }>()
 </script>

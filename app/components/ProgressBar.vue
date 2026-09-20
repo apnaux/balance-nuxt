@@ -1,5 +1,5 @@
 <template>
-  <div class="w-96 h-4 relative flex flex-row items-center" :class="{'bg-red-200': isBelowThreshold}">
+  <div class="h-4 relative flex flex-row items-center" :class="[fullWidth ? 'w-full' : 'w-full sm:w-[30rem]', { 'bg-red-200': isBelowThreshold }]">
     <div
       class="h-full absolute transition-[width] duration-300"
       :class="isBelowThreshold ? 'bg-red-600' : 'bg-black'"
@@ -27,9 +27,12 @@ const props = withDefaults(
     threshold?: number
     /** Overrides the default `value/total` text. */
     label?: string
+    /** Fill the parent's width instead of the default fixed `sm:w-[30rem]`. */
+    fullWidth?: boolean
   }>(),
   {
     threshold: 20,
+    fullWidth: false,
   },
 )
 

@@ -1,38 +1,64 @@
 <template>
-  <div class="h-svh w-svw flex flex-row justify-center mt-12">
-    <div class="flex flex-col gap-4">
+  <div class="h-svh w-svw flex flex-row justify-center p-4 sm:py-8 overflow-hidden">
+    <div class="flex flex-col gap-4 min-h-0 h-full w-full sm:w-[30rem]">
       <TabSwitcher v-model="tab" />
 
-      <TransactionsTab
-        v-if="tab === 'transactions'"
-        :balance="balance"
-        :transactions="transactions"
-        @pay="onPay"
-        @refund="onRefund"
-        @select="selected = $event"
-      />
+      <div class="flex flex-col gap-[2px]">
+        <p class="tracking-wider text-sm">REMAINING BALANCE</p>
+        <ProgressBar :value="balance" :total="BALANCE_LIMIT" :threshold="20" />
+      </div>
 
-      <AccountsTab v-else-if="tab === 'accounts'" />
+      <TabSwiper v-model="tab">
+        <template #transactions>
+          <TransactionsTab
+            :accounts="accounts"
+            :transactions="transactions"
+            @pay="onPay"
+            @refund="onRefund"
+            @select="selected = $event"
+          />
+        </template>
 
-      <SettingsTab v-else />
+        <template #accounts>
+          <AccountsTab
+            :accounts="accounts"
+            @create="onCreateAccount"
+            @select="onSelectAccount"
+          />
+        </template>
+
+        <template #settings>
+          <SettingsTab />
+        </template>
+      </TabSwiper>
     </div>
 
     <TransactionDetails
       v-if="selected"
       :transaction="selected"
+      :accounts="accounts"
       @close="selected = null"
       @save="onSave"
       @delete="onDelete"
+    />
+
+    <AccountDetails
+      v-if="accountModalOpen"
+      :account="selectedAccount ?? undefined"
+      @close="closeAccountModal"
+      @save="onSaveAccount"
+      @delete="onDeleteAccount"
     />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
-import type { Tab } from './components/TabSwitcher.vue'
-import type { Transaction } from './types'
+import { computed, ref } from 'vue'
+import type { Tab } from './tabs'
+import type { Account, Transaction } from './types'
+import type { TransactPayload } from './components/TransactionsTab.vue'
 
-const balance = ref(4000)
+const BALANCE_LIMIT = 10000
 
 const tab = ref<Tab>('transactions')
 
@@ -55,12 +81,95 @@ const transactions = ref<Transaction[]>([
 
 const selected = ref<Transaction | null>(null)
 
-function onPay(amount: string) {
-  console.log('Pay', amount)
+// Balance is derived from the ledger rather than stored, so editing or deleting
+// a transaction can never leave it out of sync. Refunds add, payments subtract.
+const balance = computed(() =>
+  transactions.value.reduce(
+    (sum, t) => (t.isRefund ? sum + t.amount : sum - t.amount),
+    BALANCE_LIMIT,
+  ),
+)
+
+const accounts = ref<Account[]>([
+  {
+    id: 1,
+    bankName: 'Banco de Oro',
+    bankShortName: 'BDO',
+    last4: '3000',
+    type: 'debit',
+  },
+  {
+    id: 2,
+    bankName: 'Bank of the Philippine Islands',
+    bankShortName: 'BPI',
+    last4: '1234',
+    type: 'credit',
+    statementDay: 15,
+    paymentDueDays: 20,
+    creditLimit: 50000,
+  },
+])
+
+// `null` means the modal is closed. An account means edit; `undefined` means
+// create, which is why the open state is tracked separately.
+const accountModalOpen = ref(false)
+const selectedAccount = ref<Account | null>(null)
+
+function onCreateAccount() {
+  selectedAccount.value = null
+  accountModalOpen.value = true
 }
 
-function onRefund(amount: string) {
-  console.log('Refund', amount)
+function onSelectAccount(account: Account) {
+  selectedAccount.value = account
+  accountModalOpen.value = true
+}
+
+function closeAccountModal() {
+  accountModalOpen.value = false
+  selectedAccount.value = null
+}
+
+function onSaveAccount(value: Omit<Account, 'id'>) {
+  if (selectedAccount.value) {
+    Object.assign(selectedAccount.value, value)
+  } else {
+    const nextId = Math.max(0, ...accounts.value.map(a => a.id)) + 1
+    accounts.value.push({ id: nextId, ...value })
+  }
+  closeAccountModal()
+}
+
+function onDeleteAccount() {
+  if (!selectedAccount.value) return
+  accounts.value = accounts.value.filter(a => a.id !== selectedAccount.value?.id)
+  closeAccountModal()
+}
+
+function onPay(payload: TransactPayload) {
+  transactions.value.unshift({
+    id: nextTransactionId(),
+    account: payload.account,
+    category: payload.category,
+    amount: payload.amount,
+    date: new Date().toISOString(),
+    isRefund: false,
+  })
+}
+
+function onRefund(payload: TransactPayload) {
+  transactions.value.unshift({
+    id: nextTransactionId(),
+    account: payload.account,
+    category: payload.category,
+    amount: payload.amount,
+    date: new Date().toISOString(),
+    isRefund: true,
+  })
+}
+
+function nextTransactionId() {
+  return Math.max(0, ...transactions.value.map(t => t.id)) + 1
 }
 
 function onSave(value: { account: string; category: string; amount: number; date: string; notes: string }) {

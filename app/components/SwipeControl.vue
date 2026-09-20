@@ -1,9 +1,9 @@
 <template>
-  <div class="flex flex-col gap-2 w-96 select-none">
+  <div class="flex flex-col gap-2 w-full sm:w-[30rem] select-none">
     <p class="tracking-wider text-sm text-center select-none">{{ title }}</p>
 
     <Swiper
-      class="swipe-control !w-96"
+      class="swipe-control !w-full sm:!w-[30rem]"
       :slides-per-view="1"
       :initial-slide="RESTING_SLIDE"
       :threshold="5"
@@ -14,11 +14,12 @@
       :resistance-ratio="1"
       :long-swipes-ratio="0.35"
       :touch-ratio="0.5"
+      :nested="true"
       @swiper="onSwiper"
       @slide-change="onSlideChange"
     >
       <SwiperSlide>
-        <div class="flex flex-row justify-end items-center p-2 w-96 bg-neutral-50 select-none">
+        <div class="flex flex-row justify-end items-center p-2 w-full sm:w-[30rem] bg-neutral-50 select-none">
           <p
             class="tracking-wider text-xl font-medium px-2 w-full text-right leading-[0.8] mr-2"
             :class="leftClass"
@@ -33,7 +34,7 @@
       </SwiperSlide>
 
       <SwiperSlide>
-        <div class="flex flex-row justify-start items-center p-2 w-96 bg-neutral-50 select-none">
+        <div class="flex flex-row justify-start items-center p-2 w-full sm:w-[30rem] bg-neutral-50 select-none">
           <p
             class="tracking-wider text-xl font-medium px-2 w-full leading-[0.8] ml-2"
             :class="rightClass"

@@ -18,13 +18,7 @@
 </template>
 
 <script setup lang="ts">
-const TABS = [
-  { value: 'transactions', icon: 'lucide:list' },
-  { value: 'accounts', icon: 'lucide:wallet' },
-  { value: 'settings', icon: 'lucide:settings' },
-] as const
-
-export type Tab = (typeof TABS)[number]['value']
+import { TABS, type Tab } from '../tabs'
 
 const model = defineModel<Tab>({ required: true })
 </script>
