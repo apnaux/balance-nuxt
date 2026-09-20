@@ -67,6 +67,7 @@ import { computed, ref } from 'vue'
 import MarkdownEditor from './MarkdownEditor.vue'
 import SelectPane from './SelectPane.vue'
 import SwipeControl from './SwipeControl.vue'
+import { CATEGORIES } from '../categories'
 import { formatAmountInput, parseAmount } from '../format'
 import type { Account } from '../types'
 
@@ -88,13 +89,6 @@ const emit = defineEmits<{
   save: [value: { account: string; category: string; amount: number; date: string; notes: string }]
   delete: []
 }>()
-
-const CATEGORIES = [
-  'GROCERIES',
-  'TRANSPORT',
-  'UTILITIES',
-  'DINING',
-]
 
 const accountOptions = computed(() =>
   props.accounts.map(a => `${a.bankShortName} *${a.last4}`),

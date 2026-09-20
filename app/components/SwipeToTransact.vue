@@ -43,19 +43,13 @@
 import { computed, ref } from 'vue'
 import SelectPane from './SelectPane.vue'
 import SwipeControl from './SwipeControl.vue'
+import { CATEGORIES } from '../categories'
 import { formatAmountInput, parseAmount } from '../format'
 import type { Account } from '../types'
 
 const props = defineProps<{
   accounts: Account[]
 }>()
-
-const CATEGORIES = [
-  'GROCERIES',
-  'TRANSPORT',
-  'UTILITIES',
-  'DINING',
-]
 
 const accountOptions = computed(() =>
   props.accounts.map(a => `${a.bankShortName} *${a.last4}`),
