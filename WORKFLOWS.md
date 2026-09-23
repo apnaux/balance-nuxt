@@ -4,15 +4,17 @@ How to make changes in this repo without breaking the swipe controls.
 
 ## The loop
 
-There is no test runner. Every change is verified by hand.
+There is no test runner. `npm run build` is the real check. `npx nuxi typecheck`
+prompts interactively to install `vue-tsc` and hangs — do not use it.
 
 ```sh
-npm run dev    # http://localhost:3000
+npm run build   # catches SSR-only failures, which Swiper is prone to
+npm run dev     # http://localhost:3000, then check the browser
 ```
 
-Then check the browser. `npx nuxi typecheck` catches type errors but not
-behavior. `npm run build` catches SSR-only failures, which matter here because
-Swiper touches `window` during init.
+`npm run build` catches compile and SSR errors but says nothing about behavior.
+Behavior has to be checked in the browser. When reporting back, say which of the
+two you did.
 
 ## Adding a feature
 
@@ -117,12 +119,19 @@ not the icons. Two turns went into installing an icon set before the real cause
 
 ## Pre-ship checklist
 
-1. Remove `:simulate-touch="true"` from `SwipeControl.vue` and `TabSwiper.vue`.
-   It exists for mouse testing during development.
-2. Run `npm run build` and confirm it succeeds. Swiper is SSR-sensitive.
-3. Run `npx nuxi typecheck`.
-4. Test at `375px` and at `1440px` wide.
-5. Test every swipe control with a mouse drag and with a touch emulation.
+1. Run `npm run build` and confirm it succeeds. Swiper is SSR-sensitive.
+2. Test at `375px` and at `1440px` wide.
+3. Test every swipe control with a mouse drag and with touch emulation.
+4. Confirm the font still loads: `public/fonts/SpaceGrotesk-Variable.ttf` should
+   appear in the network tab on load.
+
+**Do not remove `:simulate-touch="true"`.** The user was told to drop it before
+shipping and explicitly declined — without it a mouse drag does not work on
+desktop, so the app would have no way to transact. It stays in `SwipeControl.vue`
+and `TabSwiper.vue`.
+
+`npx nuxi typecheck` is not part of this checklist. It hangs on the install
+prompt. Use `npm run build`.
 
 ## Known gaps
 
@@ -132,4 +141,43 @@ not the icons. Two turns went into installing an icon set before the real cause
 3. Pinia is installed but unused.
 4. Markdown is hand-rolled, not a library.
 5. Renaming an account does not update the `account` string on existing
-   transactions.
+   transactions. Changing the label format does the same — including the change
+   that added the `DEBIT - ` / `CREDIT - ` prefix.
+6. A cycle start-day change applies immediately, despite the `TAKES EFFECT ON
+   THE NEXT CYCLE` label. **The user has not agreed to the fix.**
+7. `AmountField.vue` is dead code.
+8. No click fallback on `SwipeToTransact` for desktop users who do not know to
+   drag. Offered and declined.
+
+## Adding an option to a native select
+
+`SelectPane.vue` renders a flat `<option>` list. Do not reach for `<optgroup>`.
+The open popup is drawn by the OS: label classes apply in Firefox and are
+ignored by Chrome, Edge, and Safari. An `<optgroup>` added here produced exactly
+that mismatch and the user's response was *"it looks so odd"*.
+
+To group by type, build the group name into the option text:
+
+```ts
+const accountOptions = computed(() =>
+  props.accounts.map(a => `${a.type === 'credit' ? 'CREDIT' : 'DEBIT'} - ${a.bankShortName} *${a.last4}`),
+)
+```
+
+Changing the format invalidates stored values. A transaction whose `account`
+string no longer matches any option renders a blank select until the user picks
+again. If that matters, make the lookup tolerant of both formats.
+
+If the grouping genuinely must be styled, the only path is a custom listbox —
+a button plus an absolutely positioned `<ul>`, with keyboard nav, focus, and
+outside-click handling written by hand. Roughly an hour of work. Not done yet.
+
+## Adding a settings section
+
+1. Create `app/components/<Name>Pane.vue`. Flat in `app/components/`.
+2. Take the data as props. Do not import `app.vue`'s refs.
+3. Emit a single event per mutation. `app.vue` owns the handler.
+4. Render it inside an `AccordionSection` in `SettingsTab.vue`, passing `title`
+   and the props.
+5. Verify the accordion still opens and closes — `AccordionSection` owns that
+   state, and a pane that renders nothing makes the section look broken.

@@ -1,5 +1,6 @@
 export const TABS = [
   { value: 'transactions', icon: 'lucide:list' },
+  { value: 'recurring', icon: 'lucide:repeat' },
   { value: 'accounts', icon: 'lucide:wallet' },
   { value: 'settings', icon: 'lucide:settings' },
 ] as const

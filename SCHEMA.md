@@ -13,7 +13,7 @@ in `app/app.vue`.
 ```ts
 export type Transaction = {
   id: number
-  account: string      // display label, e.g. "BDO *3000"
+  account: string      // display label, e.g. "DEBIT - BDO *3000"
   amount: number       // always positive; direction comes from isRefund
   date: string         // ISO 8601, e.g. "2026-01-01T12:00:00"
   isRefund: boolean
@@ -33,15 +33,33 @@ export type Account = {
   paymentDueDays?: number   // credit only, days after statementDay
   creditLimit?: number      // credit only
 }
+
+export type User = {
+  email: string
+  createdAt: string       // ISO timestamp, set on login
+}
+
+export type Cycle = {
+  startDay: number        // day of the month a cycle starts, 1-31
+}
+
+/**
+ * A single spending budget for a cycle. Deliberately not per category: the
+ * budget tracks the remaining balance, so one number covers the whole cycle.
+ */
+export type Budget = {
+  amount: number          // the standing limit
+  overrides?: Record<string, number>   // one-off limits, keyed by cycle start
+}
 ```
 
 ### Invariants
 
 1. **`amount` is never negative.** A refund is `isRefund: true` with a positive
    `amount`. Nothing in the codebase branches on a negative amount.
-2. **`account` is a denormalized display string, not a foreign key.** It is
-   built as `` `${bankShortName} *${last4}` `` and stored on the transaction.
-   Renaming an account does not update existing transactions. This is a known
+2. **`account` is a denormalized display string, not a foreign key.** Stored on
+   the transaction. Renaming an account does not update existing transactions,
+   and neither does changing the label format this repo writes. This is a known
    gap, not an oversight.
 3. **Credit-only fields are `undefined` on debit accounts.** `AccountDetails`
    drops them on save rather than leaving stale values behind.
@@ -49,6 +67,12 @@ export type Account = {
    when editing. Switching credit to debit would orphan the three credit fields.
 5. **`id` is unique within its collection.** New ids come from
    `Math.max(0, ...items.map(i => i.id)) + 1`.
+6. **A `Budget` override is keyed by the cycle start date as `YYYY-MM-DD`.**
+   The key comes from `cycleKey`; once the cycle rolls over, the old key is
+   never read again. Nothing prunes stale keys.
+7. **`account` labels are built as `` `${TYPE} - ${bankShortName} *${last4}` ``.**
+   Type first, uppercase, so a native select can carry the grouping even though
+   its popup cannot be styled. There is no `<optgroup>`; see `AGENTS.md`.
 
 ## State ownership
 
@@ -62,22 +86,37 @@ All state is in `app/app.vue`. No component owns domain data.
 | `selected` | `Transaction \| null` | Transaction modal. `null` = closed |
 | `selectedAccount` | `Account \| null` | `null` = create mode |
 | `accountModalOpen` | `boolean` | Separate from `selectedAccount`, because `null` means "create" |
-
-`BALANCE_LIMIT` is a module constant of `10000`.
+| `user` | `User \| null` | Set by `LoginPane`, cleared by `AccountPane` |
+| `cycle` | `Cycle` | Cycle start day |
+| `budget` | `Budget` | Standing limit plus any per-cycle overrides |
 
 ### Derived values
 
+There is no `BALANCE_LIMIT`. The budget and the balance are one number: the
+balance starts from the cycle budget, so changing the budget moves the bar.
+
 ```ts
+const currentStart = computed(() => cycleStartOnOrBefore(new Date(), cycle.value.startDay))
+const nextStart = computed(() => cycleStartAfter(new Date(), cycle.value.startDay))
+
+// The current cycle's start date as `YYYY-MM-DD`, used as the override key.
+const cycleKey = computed(() => /* currentStart formatted */)
+
+// One-off override if one was set this cycle, else the standing budget.
+const cycleBudget = computed(() => budget.value.overrides?.[cycleKey.value] ?? budget.value.amount)
+
 const balance = computed(() =>
   transactions.value.reduce(
     (sum, t) => (t.isRefund ? sum + t.amount : sum - t.amount),
-    BALANCE_LIMIT,
+    cycleBudget.value,
   ),
 )
 ```
 
-Balance is **derived, never stored**. Editing or deleting a transaction updates
-the bar with no extra wiring. Refunds add, payments subtract.
+`ProgressBar` receives `:value="balance" :total="cycleBudget" :threshold="20"`.
+All three are **derived, never stored**. Editing or deleting a transaction, or
+changing the budget, updates the bar with no extra wiring. Refunds add, payments
+subtract.
 
 ## Mutations
 
@@ -93,10 +132,27 @@ All in `app/app.vue`:
 | `onSelectAccount(a)` | `AccountsTab` → `select` | Set `selectedAccount`, open modal |
 | `onSaveAccount(value)` | `AccountDetails` → `save` | Assign if editing, else push with a new id |
 | `onDeleteAccount()` | `AccountDetails` → `delete` | Filter out `selectedAccount.id` |
+| `onLogin(credentials)` | `SettingsTab` → `login` | Set `user` with `createdAt: new Date().toISOString()` |
+| `onSignUp(credentials)` | `SettingsTab` → `signUp` | Delegates to `onLogin`. No backend, so they are identical |
+| `onLogout()` | `SettingsTab` → `logout` | `user = null` |
+| `onSetBudgetPermanent(amount)` | `SettingsTab` → `setBudgetPermanent` | Sets `budget.amount`, then deletes any override for the current cycle |
+| `onSetBudgetTemporary(amount)` | `SettingsTab` → `setBudgetTemporary` | `overrides[cycleKey] = amount`, one cycle only |
+| `onClearBudgetTemporary()` | `SettingsTab` → `clearBudgetTemporary` | Delete `overrides[cycleKey]` |
+| `onChangeCycle(startDay)` | `SettingsTab` → `changeCycle` | `cycle.value = { startDay }` |
+
+Note the naming: the pans emit `setPermanent` / `setTemporary` / `clearTemporary`,
+but `SettingsTab` re-emits them renamed with a `setBudget` prefix, and `app.vue`
+listens for the **renamed** events. When tracing an event, check both hops.
 
 `onSave` and `onSaveAccount` mutate the object in place. Because `transactions`
 and `accounts` hold the same object references, the list re-renders without
 replacing the array.
+
+`onSetBudgetPermanent` deletes the current cycle's override. A standing budget
+change supersedes a one-off set earlier in the same cycle.
+
+`onChangeCycle` applies **immediately**, even though `CyclePane` renders
+`TAKES EFFECT ON THE NEXT CYCLE`. See known gap 5 in `AGENTS.md`.
 
 ## Component contracts
 
@@ -124,6 +180,9 @@ Direction mapping, which is the part that has been wrong before:
 Props: `accounts: Account[]`. Emits `pay` and `refund`, each with
 `{ amount: number; account: string; category: string }`. Ignores a swipe when
 the parsed amount is `0` or no account is selected. Clears the amount on success.
+
+Builds `accountOptions` as `` `${type.toUpperCase()} - ${bankShortName} *${last4}` ``
+via a `computed`. There is no `optgroup`; see `SelectPane.vue` above.
 
 ### `TransactionsTab.vue`
 
@@ -156,6 +215,30 @@ value/total mode. Below `threshold` the track turns `bg-red-200` and the fill
 Props: `label`, `options: string[]`, `selected: string`. Emits `select` with the
 chosen string. A native `<select>` with `appearance-none`.
 
+Only flat options. There is no `groups` prop and no `<optgroup>` — the popup is
+OS-drawn and cannot be styled, so grouping is folded into the option text
+instead. Values are the full display label, e.g. `DEBIT - BDO *3000`.
+
+### Settings components
+
+All three are rendered by `SettingsTab.vue` inside `AccordionSection`s and are
+otherwise independent.
+
+| Component | Props | Emits |
+|---|---|---|
+| `AccordionSection.vue` | `title`, `defaultOpen` (default `false`) | none — slot for content |
+| `LoginPane.vue` | none | `login`, `signUp`, each `{ email, password }` |
+| `AccountPane.vue` | `user: { email, createdAt }` | `logout` |
+| `BudgetsPane.vue` | `budget`, `cycleKey: string`, `cycleLabel: string` | `setPermanent`, `setTemporary`, `clearTemporary` |
+| `CyclePane.vue` | `cycle: Cycle`, `currentStart: string`, `nextStart: string` | `change` with the new start day |
+
+`AccordionSection` owns its own open/closed state. `LoginPane` holds email and
+password as local refs and does not validate — there is no backend.
+
+`CyclePane` takes the cycle boundaries as **ISO strings**, not `Date` objects,
+and formats them for display. `BudgetsPane` takes `cycleKey` separately from
+`cycleLabel`: the key indexes `overrides`, the label is what renders.
+
 ### `MarkdownEditor.vue`
 
 `v-model` on a string. Prop `label` (default `'NOTES'`). Defaults to the
@@ -176,6 +259,12 @@ They are parsed on save or on swipe.
 
 ## Seed data
 
-`app.vue` ships two transactions (one payment, one refund, both `100.00` on
-`BDO *3000`) and two accounts (BDO debit, BPI credit with a `50000` limit).
-Starting balance is therefore `10000 - 100 + 100 = 10000`.
+`app.vue` ships two transactions (one payment, one refund, both `100.00`), two
+accounts (BDO debit, BPI credit with a `50000` limit), a budget of `10000`, a
+cycle start day of `15`, and no logged-in user. Starting balance is therefore
+`10000 - 100 + 100 = 10000`.
+
+Seeded transactions store the pre-grouping label format (`BDO *3000`, no type
+prefix). Opening one in `TransactionDetails` therefore shows a blank account
+select until a new option is chosen. This is known gap 7 in `AGENTS.md`, not a
+regression.

@@ -24,9 +24,10 @@
     <div class="flex flex-row w-full sm:w-[30rem]">
       <SelectPane
         label="ACCOUNT"
-        :options="accountOptions"
-        :selected="account"
-        @select="account = $event"
+        :options="options.labels"
+        :option-values="options.values"
+        :selected="accountId"
+        @select="accountId = $event"
       />
 
       <SelectPane
@@ -44,24 +45,24 @@ import { computed, ref } from 'vue'
 import SelectPane from './SelectPane.vue'
 import SwipeControl from './SwipeControl.vue'
 import { CATEGORIES } from '../categories'
+import { accountOptions } from '../accounts'
 import { formatAmountInput, parseAmount } from '../format'
-import type { Account } from '../types'
+import type { Account, TransactPayload } from '../types'
 
 const props = defineProps<{
   accounts: Account[]
 }>()
 
-const accountOptions = computed(() =>
-  props.accounts.map(a => `${a.bankShortName} *${a.last4}`),
-)
+const options = computed(() => accountOptions(props.accounts))
 
 const amount = ref('')
-const account = ref(accountOptions.value[0] ?? '')
+// Held as a string to match the select, converted to a number on emit.
+const accountId = ref(options.value.values[0] ?? '')
 const category = ref(CATEGORIES[0] ?? '')
 
 const emit = defineEmits<{
-  pay: [payload: { amount: number; account: string; category: string }]
-  refund: [payload: { amount: number; account: string; category: string }]
+  pay: [payload: TransactPayload]
+  refund: [payload: TransactPayload]
 }>()
 
 function onAmountInput(event: Event) {
@@ -76,15 +77,15 @@ function onAmountInput(event: Event) {
 
 function onPay() {
   const value = parseAmount(amount.value)
-  if (!value || !account.value) return
-  emit('pay', { amount: value, account: account.value, category: category.value })
+  if (!value || !accountId.value) return
+  emit('pay', { amount: value, accountId: Number(accountId.value), category: category.value })
   amount.value = ''
 }
 
 function onRefund() {
   const value = parseAmount(amount.value)
-  if (!value || !account.value) return
-  emit('refund', { amount: value, account: account.value, category: category.value })
+  if (!value || !accountId.value) return
+  emit('refund', { amount: value, accountId: Number(accountId.value), category: category.value })
   amount.value = ''
 }
 </script>

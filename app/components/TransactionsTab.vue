@@ -12,10 +12,13 @@
         <TransactionItem
           v-for="transaction in transactions"
           :key="transaction.id"
-          :account="transaction.account"
+          :account-id="transaction.accountId"
+          :accounts="accounts"
           :amount="transaction.amount"
           :date="transaction.date"
           :is-refund="transaction.isRefund"
+          :recurring-id="transaction.recurringId"
+          :recurring="recurring"
           @select="emit('select', transaction)"
         />
       </div>
@@ -26,18 +29,12 @@
 <script setup lang="ts">
 import SwipeToTransact from './SwipeToTransact.vue'
 import TransactionItem from './TransactionItem.vue'
-import type { Account, Transaction } from '../types'
-
-/** Payload emitted by `SwipeToTransact` when a swipe completes. */
-export type TransactPayload = {
-  amount: number
-  account: string
-  category: string
-}
+import type { Account, RecurringTransaction, Transaction, TransactPayload } from '../types'
 
 defineProps<{
   accounts: Account[]
   transactions: Transaction[]
+  recurring: RecurringTransaction[]
 }>()
 
 const emit = defineEmits<{

@@ -13,9 +13,22 @@
           <TransactionsTab
             :accounts="accounts"
             :transactions="transactions"
+            :recurring="recurring"
             @pay="onPay"
             @refund="onRefund"
             @select="selected = $event"
+          />
+        </template>
+
+        <template #recurring>
+          <RecurringTab
+            :items="recurring"
+            :accounts="accounts"
+            :transactions="transactions"
+            :cycle-start="currentStart.toISOString()"
+            @create="onCreateRecurring"
+            @edit="onEditRecurring"
+            @pay="onPayRecurring"
           />
         </template>
 
@@ -52,6 +65,7 @@
       v-if="selected"
       :transaction="selected"
       :accounts="accounts"
+      :recurring="recurring"
       @close="selected = null"
       @save="onSave"
       @delete="onDelete"
@@ -64,14 +78,30 @@
       @save="onSaveAccount"
       @delete="onDeleteAccount"
     />
+
+    <RecurringDetails
+      v-if="recurringModalOpen"
+      :item="selectedRecurring ?? undefined"
+      :accounts="accounts"
+      @close="closeRecurringModal"
+      @save="onSaveRecurring"
+      @delete="onDeleteRecurring"
+    />
+
+    <PayRecurringDialog
+      v-if="payingRecurring"
+      :item="payingRecurring"
+      :accounts="accounts"
+      @close="payingRecurring = null"
+      @confirm="onConfirmRecurringPay"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import type { Tab } from './tabs'
-import type { Account, Budget, Cycle, Transaction, User } from './types'
-import type { TransactPayload } from './components/TransactionsTab.vue'
+import type { Account, Budget, Cycle, RecurringTransaction, Transaction, TransactPayload, User } from './types'
 import { cycleStartAfter, cycleStartOnOrBefore, formatCycleDate } from './cycle'
 
 const tab = ref<Tab>('transactions')
@@ -79,14 +109,14 @@ const tab = ref<Tab>('transactions')
 const transactions = ref<Transaction[]>([
   {
     id: 1,
-    account: 'BDO *3000',
+    accountId: 1,
     amount: 100,
     date: '2026-01-01T12:00:00',
     isRefund: false,
   },
   {
     id: 2,
-    account: 'BDO *3000',
+    accountId: 1,
     amount: 100,
     date: '2026-01-01T12:00:00',
     isRefund: true,
@@ -94,6 +124,108 @@ const transactions = ref<Transaction[]>([
 ])
 
 const selected = ref<Transaction | null>(null)
+
+// --- Recurring ------------------------------------------------------------
+
+const recurring = ref<RecurringTransaction[]>([
+  {
+    id: 1,
+    name: 'Car Loan',
+    accountId: 1,
+    category: 'OTHERS',
+    amount: 5000,
+    type: 'auto',
+    recurrence: 'monthly',
+    dueDay: 15,
+    active: true,
+  },
+  {
+    id: 2,
+    name: 'Netflix',
+    accountId: 2,
+    category: 'SUBSCRIPTION',
+    amount: 549,
+    type: 'default',
+    recurrence: 'monthly',
+    dueDay: 20,
+    active: true,
+  },
+  {
+    id: 3,
+    name: 'Meralco',
+    accountId: 1,
+    category: 'UTILITIES',
+    amount: 3500,
+    type: 'approximate',
+    recurrence: 'monthly',
+    dueDay: 25,
+    active: true,
+  },
+])
+
+// `null` means the modal is closed, matching the accounts pattern. The open
+// state is tracked separately because `null` also means "create".
+const recurringModalOpen = ref(false)
+const selectedRecurring = ref<RecurringTransaction | null>(null)
+
+// The item awaiting payment confirmation. Only ever a `default` or
+// `approximate` item: an `auto` item has no manual pay path.
+const payingRecurring = ref<RecurringTransaction | null>(null)
+
+function onCreateRecurring() {
+  selectedRecurring.value = null
+  recurringModalOpen.value = true
+}
+
+function onEditRecurring(item: RecurringTransaction) {
+  selectedRecurring.value = item
+  recurringModalOpen.value = true
+}
+
+function closeRecurringModal() {
+  recurringModalOpen.value = false
+  selectedRecurring.value = null
+}
+
+function onSaveRecurring(value: Omit<RecurringTransaction, 'id'>) {
+  if (selectedRecurring.value) {
+    Object.assign(selectedRecurring.value, value)
+  } else {
+    const nextId = Math.max(0, ...recurring.value.map(r => r.id)) + 1
+    recurring.value.push({ id: nextId, ...value })
+  }
+  closeRecurringModal()
+}
+
+function onDeleteRecurring() {
+  if (!selectedRecurring.value) return
+  recurring.value = recurring.value.filter(r => r.id !== selectedRecurring.value?.id)
+  closeRecurringModal()
+}
+
+function onPayRecurring(item: RecurringTransaction) {
+  // Belt and braces: the PAY button is not rendered for `auto` items, but the
+  // guard stays so a future caller cannot bypass the auto-deduct rule.
+  if (item.type === 'auto') return
+  payingRecurring.value = item
+}
+
+function onConfirmRecurringPay(amount: number) {
+  const item = payingRecurring.value
+  if (!item) return
+
+  transactions.value.unshift({
+    id: nextTransactionId(),
+    accountId: item.accountId,
+    category: item.category,
+    amount,
+    date: new Date().toISOString(),
+    isRefund: false,
+    recurringId: item.id,
+  })
+
+  payingRecurring.value = null
+}
 
 // --- Settings -------------------------------------------------------------
 
@@ -137,6 +269,59 @@ const balance = computed(() =>
     cycleBudget.value,
   ),
 )
+
+// --- Auto-deduct ----------------------------------------------------------
+
+// Items already handled in this session, so a `cycleKey` change in the same
+// tick cannot race the mount pass. The durable guard is the ledger scan in
+// `alreadyDeductedThisCycle`, which also survives a reload.
+const autoDeductedThisSession = new Set<number>()
+
+/** True when the ledger already holds an entry for this item this cycle. */
+function alreadyDeductedThisCycle(item: RecurringTransaction) {
+  const start = currentStart.value.getTime()
+  return transactions.value.some(t =>
+    t.recurringId === item.id && new Date(t.date).getTime() >= start,
+  )
+}
+
+/**
+ * Deduct every active `auto` item that applies to the cycle in progress.
+ *
+ * Fires at cycle start, not on the due date: an `auto` item is an expected
+ * expense, so there is nothing to wait for. The entry is dated at the cycle
+ * start, so it reads correctly whenever the app is opened.
+ */
+function runAutoDeduct() {
+  const start = currentStart.value
+
+  for (const item of recurring.value) {
+    if (item.type !== 'auto' || !item.active) continue
+    if (autoDeductedThisSession.has(item.id)) continue
+    if (alreadyDeductedThisCycle(item)) continue
+
+    transactions.value.unshift({
+      id: nextTransactionId(),
+      accountId: item.accountId,
+      category: item.category,
+      amount: item.amount,
+      date: start.toISOString(),
+      isRefund: false,
+      recurringId: item.id,
+    })
+
+    autoDeductedThisSession.add(item.id)
+  }
+}
+
+// Gated to the client: the first render is server-side, and a deduction made
+// there would write to a ledger that is about to be discarded. Runs on mount
+// because entries are back-filled for the cycle in progress rather than created
+// at the moment the cycle rolls over.
+if (import.meta.client) {
+  nextTick(runAutoDeduct)
+  watch(cycleKey, runAutoDeduct)
+}
 
 const accounts = ref<Account[]>([
   {
@@ -197,7 +382,7 @@ function onDeleteAccount() {
 function onPay(payload: TransactPayload) {
   transactions.value.unshift({
     id: nextTransactionId(),
-    account: payload.account,
+    accountId: payload.accountId,
     category: payload.category,
     amount: payload.amount,
     date: new Date().toISOString(),
@@ -208,7 +393,7 @@ function onPay(payload: TransactPayload) {
 function onRefund(payload: TransactPayload) {
   transactions.value.unshift({
     id: nextTransactionId(),
-    account: payload.account,
+    accountId: payload.accountId,
     category: payload.category,
     amount: payload.amount,
     date: new Date().toISOString(),
@@ -220,7 +405,7 @@ function nextTransactionId() {
   return Math.max(0, ...transactions.value.map(t => t.id)) + 1
 }
 
-function onSave(value: { account: string; category: string; amount: number; date: string; notes: string }) {
+function onSave(value: { accountId: number; category: string; amount: number; date: string; notes: string }) {
   if (!selected.value) return
   Object.assign(selected.value, value)
   selected.value = null

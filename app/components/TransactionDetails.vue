@@ -15,6 +15,14 @@
       >
         <div class="w-full sm:w-[30rem] bg-neutral-50 flex flex-col p-4">
           <p class="tracking-wider text-sm font-medium">{{ transaction.isRefund ? "REFUND" : "PAYMENT" }} DETAILS</p>
+          <!-- Only present for an entry produced by a recurring item. The name
+               is resolved live, so a rename shows through immediately. -->
+          <p
+            v-if="sourceTag"
+            class="tracking-wider text-xs w-fit px-1 mt-1 mb-1 bg-neutral-200 text-neutral-800"
+          >
+            {{ sourceTag }}{{ sourceName ? ` - ${sourceName}` : '' }}
+          </p>
           <div
             class="flex flex-row gap-2"
             :class="transaction.isRefund ? 'text-red-600' : ''"
@@ -34,9 +42,10 @@
         <div class="flex flex-row w-full sm:w-[30rem]">
           <SelectPane
             label="ACCOUNT"
-            :options="accountOptions"
-            :selected="account"
-            @select="account = $event"
+            :options="options.labels"
+            :option-values="options.values"
+            :selected="accountId"
+            @select="accountId = $event"
           />
 
           <SelectPane
@@ -68,33 +77,41 @@ import MarkdownEditor from './MarkdownEditor.vue'
 import SelectPane from './SelectPane.vue'
 import SwipeControl from './SwipeControl.vue'
 import { CATEGORIES } from '../categories'
+import { accountOptions } from '../accounts'
 import { formatAmountInput, parseAmount } from '../format'
-import type { Account } from '../types'
+import type { Account, RecurringTransaction, Transaction } from '../types'
 
 const props = defineProps<{
-  transaction: {
-    id: number
-    account: string
-    amount: number
-    date: string
-    isRefund?: boolean
-    category?: string
-    notes?: string
-  }
+  transaction: Transaction
   accounts: Account[]
+  recurring?: RecurringTransaction[]
 }>()
 
 const emit = defineEmits<{
   close: []
-  save: [value: { account: string; category: string; amount: number; date: string; notes: string }]
+  save: [value: { accountId: number; category: string; amount: number; date: string; notes: string }]
   delete: []
 }>()
 
-const accountOptions = computed(() =>
-  props.accounts.map(a => `${a.bankShortName} *${a.last4}`),
+const options = computed(() => accountOptions(props.accounts))
+
+// Read-only provenance line. A `recurringId` whose source has been deleted
+// resolves to nothing, so the tag still shows but the name is omitted.
+const source = computed(() =>
+  (props.recurring ?? []).find(r => r.id === props.transaction.recurringId),
 )
 
-const account = ref(props.transaction.account)
+const sourceName = computed(() => source.value?.name ?? '')
+
+const sourceTag = computed(() => {
+  if (props.transaction.recurringId === undefined) return ''
+  return source.value?.type === 'auto' ? 'AUTO-DEDUCTED' : 'RECURRING'
+})
+
+// Held as a string to match the select, converted on save. Seeded from the
+// stored id, which may no longer match an account — the select then renders
+// blank until the user picks again, which is the honest signal.
+const accountId = ref(String(props.transaction.accountId))
 const category = ref(props.transaction.category ?? CATEGORIES[0] ?? '')
 const notes = ref(props.transaction.notes ?? '')
 
@@ -117,7 +134,7 @@ function onAmountInput(event: Event) {
 
 function onEdit() {
   emit('save', {
-    account: account.value,
+    accountId: Number(accountId.value),
     category: category.value,
     amount: parseAmount(amount.value),
     date: date.value,

@@ -8,9 +8,9 @@
       @change="onChange"
     >
       <option
-        v-for="option in options"
-        :key="option"
-        :value="option"
+        v-for="(option, index) in options"
+        :key="optionValues?.[index] ?? option"
+        :value="optionValues?.[index] ?? option"
       >
         {{ option }}
       </option>
@@ -19,9 +19,16 @@
 </template>
 
 <script setup lang="ts">
-defineProps<{
+const props = defineProps<{
   label: string
+  /** Labels shown in the list. */
   options: string[]
+  /**
+   * Values submitted for each option, positionally matched to `options`.
+   * Omit to submit the labels themselves. Needed when the real value is not
+   * the label, e.g. an account id, because `<option value>` is a string.
+   */
+  optionValues?: string[]
   selected: string
 }>()
 

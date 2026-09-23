@@ -16,6 +16,10 @@ not from bad code:
    reversed."*
 3. **A font that would not load** was chased through path changes for three
    turns. The stack trace resolved it instantly.
+4. **"It looks so odd"** about an `<optgroup>` label was acted on as a styling
+   request. The real problem was structural: the popup is OS-drawn and cannot
+   be styled at all. The fix was to abandon the grouping mechanism, not to
+   adjust its classes.
 
 Each is preventable with a more specific prompt.
 
@@ -86,6 +90,13 @@ overreach. One sentence up front prevents it.
 | "the thing" | the file path and line range |
 | "fix the bug" | the error text plus the repro steps |
 | "change everything about X" | "change only X, leave Y alone" |
+| "looks odd" | "the labels render in the system font, not mine" |
+| "not working" | which browser, and what you see instead |
+
+"It looks weird" and "it's not working" are the two reports that consistently
+take the most turns. Both are true but neither narrows the cause. One added
+clause usually does: "it looks weird **because the headings are in Arial**" or
+"not working **in Chrome, but it's fine in Firefox**".
 
 ## Prompt templates
 
@@ -130,14 +141,21 @@ Do not change: <anything else>.
 
 **"Do not change anything else."** This repo has a lot of interlocking pieces.
 An unrequested refactor of `SwipeControl.vue` breaks both modals and the
-transact control at once.
+transact control at once. The user has said this directly: *"No, why did you
+remove the swipable element ._. I said just to change the part where it says
+'SWIPE TO TRANSACT'"*.
+
+**"Announce your plan first."** Also stated directly. Before a change that
+touches more than one file, write the plan and wait. This catches scope
+disagreements before any file is written, which is cheaper than reverting.
 
 **"Follow the existing design language."** Uppercase, `tracking-wider`,
 `text-sm`, `bg-neutral-50`/`bg-neutral-100`, black/white. New components that
 invent their own styling look wrong next to the rest.
 
 **"Verify in the browser."** There is no test suite. If you do not say the
-change was checked, it was not checked.
+change was checked, it was not checked. `npm run build` alone is not enough —
+it does not exercise the swipe guards.
 
 ## What the agent should ask for
 
@@ -155,3 +173,6 @@ question, ask it back: *"what do you need to know?"*
    breakpoint?
 4. **Silent scope creep.** "While you're in there..." turns a one-line fix into
    a review of five files.
+5. **Proposing a fix for a problem you have not localized.** The agent should
+   ask what the error says before writing code. If you get a theory instead of a
+   question, ask it back: *"what do you need to know?"*
